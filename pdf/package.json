@@ -1,0 +1,12 @@
+{
+    "scripts": {
+        "gcp-build": "node node_modules/puppeteer/install.mjs"
+    },
+    "dependencies": {
+        "@google-cloud/functions-framework": "^3.0.0",
+        "@google-cloud/storage": "^7.12.1",
+        "pdf-lib-plus-encrypt": "^1.1.0",
+        "puppeteer": "^23.1.0",
+        "sharp": "^0.33.5"
+    }
+}
