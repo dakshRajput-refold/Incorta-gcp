@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.0.0",
+    "@google-cloud/storage": "^7.12.1",
+    "papaparse": "^5.4.1",
+    "json-2-csv": "^5.5.7",
+    "axios": "^1.6.8",
+    "xlsx": "^0.18.5",
+    "exceljs": "^4.4.0",
+    "mime-types": "^3.0.1"
+  }
+}
