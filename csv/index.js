@@ -29,7 +29,7 @@ functions.http("csvexcel", async (req, res) => {
         res.status(405).send("Method Not Allowed. Only POST requests are allowed.");
         return;
     } else {
-        try{
+        try {
             const { action, inputData } = req.body;
 
             if (!action || !inputData) {
@@ -73,7 +73,7 @@ functions.http("csvexcel", async (req, res) => {
             }
 
             res.status(200).send(result);
-        } catch(error){
+        } catch (error) {
             res.status(500).send({ error: error.message });
         }
     }
@@ -82,24 +82,24 @@ functions.http("csvexcel", async (req, res) => {
 async function writeDataToFile(inputData) {
     let { data, file_format, file_name, content_type } = inputData;
 
-    if(file_format === "text"){
+    if (file_format === "text") {
         file_format = "txt";
     }
-    if(file_format === "excel"){
+    if (file_format === "excel") {
         file_format = "xlsx";
     }
 
     const fileContentType = content_type || mime.contentType(file_format);
 
-    if(!fileContentType){
+    if (!fileContentType) {
         throw new Error("Not able to automatically infer content type. Please provide a valid content type.");
     }
 
-    if(!mime.extension(fileContentType)){
+    if (!mime.extension(fileContentType)) {
         throw new Error("Invalid content type: " + fileContentType);
     }
 
-    if(file_format === "json"){
+    if (file_format === "json") {
         data = JSON.stringify(data);
     }
 
@@ -110,11 +110,11 @@ async function writeDataToFile(inputData) {
 
 async function base64ToFile(inputData) {
     const { b64_string, file_format, file_name } = inputData;
-    
+
     if (!b64_string || !file_format) {
         throw new Error("Missing 'b64_string' or 'file_format' in inputData");
     }
-    
+
     if (typeof b64_string !== "string") {
         throw new Error("'b64_string' must be a string");
     }
@@ -134,15 +134,15 @@ async function base64ToFile(inputData) {
     }
 
     const fileContentType = mime.contentType(normalizedFormat);
-    
+
     if (!fileContentType) {
         throw new Error("Not able to automatically infer content type. Please provide a valid file format.");
     }
-    
+
     if (!mime.extension(fileContentType)) {
         throw new Error("Invalid content type: " + fileContentType);
     }
-    
+
     let fileData;
     try {
         const base64Data = b64_string.includes(',') ? b64_string.split(',')[1] : b64_string;
@@ -150,7 +150,7 @@ async function base64ToFile(inputData) {
     } catch (e) {
         throw new Error("Invalid base64 string: " + e.message);
     }
-    
+
     const key = file_name ? `${file_name}.${normalizedFormat}` : `base64_to_file_${Date.now()}.${normalizedFormat}`;
     const url = await uploadToGCP(key, fileData, fileContentType);
     return { url };
@@ -181,7 +181,7 @@ async function csvToJson(inputData, uploadToBucket = false) {
 }
 
 async function jsonToCsv(inputData, uploadToBucket = false) {
-     if (inputData.json_file_url && uploadToBucket) {
+    if (inputData.json_file_url && uploadToBucket) {
         if (typeof inputData.json_file_url === "string" && inputData.json_file_url.startsWith("http")) {
             inputData.rows = await readDataFromUrl(inputData.json_file_url);
         } else {
@@ -326,7 +326,7 @@ async function csvToExcel(inputData) {
 
     const ws = xlsx.utils.json_to_sheet(data);
 
-    if(has_formulas){
+    if (has_formulas) {
         const range = xlsx.utils.decode_range(ws['!ref']);
 
         for (let row = range.s.r; row <= range.e.r; row++) {
@@ -359,6 +359,17 @@ function fixIntegerCellFormats(ws) {
     });
 }
 
+function preserveColumnWidths(ws) {
+    const cols = ws['!cols'];
+    if (!cols) return;
+
+    ws['!cols'] = cols.map(col => {
+        if (!col) return col;
+        const { bestFit, bestfit, ...rest } = col;
+        return { ...rest, wch: col.wch || col.width };
+    });
+}
+
 async function mergeExcelFiles(inputData) {
     if (inputData.excel_files.length > 200) {
         throw new Error("Maximum 200 files can be merged at a time");
@@ -370,11 +381,12 @@ async function mergeExcelFiles(inputData) {
         // Merge all sheets from all files into one sheet
         let mergedRows = [];
         let headerKeys = null;
+        let colWidths = null;
 
         for (const file of inputData.excel_files) {
             const excelData = await readDataFromUrl(file);
             // const wbData = xlsx.read(excelData, { type: 'buffer' });
-            const wbData = xlsx.read(excelData, { type: "buffer", cellDates: true, cellNF: true });
+            const wbData = xlsx.read(excelData, { type: "buffer", cellDates: true, cellNF: true, cellStyles: true });
             for (const sheetName of wbData.SheetNames) {
                 const ws = wbData.Sheets[sheetName];
                 const rows = xlsx.utils.sheet_to_json(ws, { defval: "" });
@@ -382,6 +394,10 @@ async function mergeExcelFiles(inputData) {
 
                 if (!headerKeys) {
                     headerKeys = Object.keys(rows[0]);
+                    if (ws['!cols']) {
+                        preserveColumnWidths(ws); // normalize on source sheet at capture time
+                        colWidths = ws['!cols'];  // now already normalized
+                    }
                 }
                 mergedRows = mergedRows.concat(rows);
             }
@@ -389,6 +405,9 @@ async function mergeExcelFiles(inputData) {
 
         const ws = xlsx.utils.json_to_sheet(mergedRows);
         fixIntegerCellFormats(ws);
+        if (colWidths) {
+            ws['!cols'] = colWidths; // already normalized, no need to call preserveColumnWidths again
+        }
         xlsx.utils.book_append_sheet(wb, ws, "Sheet1");
     } else {
         // Default: each sheet from each file becomes a separate sheet
@@ -396,10 +415,11 @@ async function mergeExcelFiles(inputData) {
         for (const file of inputData.excel_files) {
             const excelData = await readDataFromUrl(file);
             // const wbData = xlsx.read(excelData, { type: 'buffer' });
-            const wbData = xlsx.read(excelData, { type: "buffer", cellDates: true, cellNF: true });
+            const wbData = xlsx.read(excelData, { type: "buffer", cellDates: true, cellNF: true, cellStyles: true });
             wbData.SheetNames.forEach((sheetName) => {
                 const ws = wbData.Sheets[sheetName];
                 fixIntegerCellFormats(ws);
+                preserveColumnWidths(ws);
                 const truncatedSheetName = sheetName.substring(0, 27);
                 xlsx.utils.book_append_sheet(wb, ws, `${truncatedSheetName}_${sheetIndex}`);
                 sheetIndex++;
